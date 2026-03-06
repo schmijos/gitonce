@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>gadget-mallet</title>
+</head>
+<body>
+  <h1>Upload a zip to serve as a git repository</h1>
+  <form method="POST" action="/upload" enctype="multipart/form-data">
+    <input type="file" name="zipfile" accept=".zip" required>
+    <button type="submit">Upload</button>
+  </form>
+</body>
+</html>
