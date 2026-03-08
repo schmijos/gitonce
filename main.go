@@ -15,7 +15,7 @@ import (
 
 const defaultPort = "8080"
 const maxUploadSize = 50 << 20 // 50 MB
-const uploadsDir = "uploads"
+const uploadsDir = "/tmp"
 
 func newMux() *http.ServeMux {
 	mux := http.NewServeMux()
