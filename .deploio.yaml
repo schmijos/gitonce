@@ -1,0 +1,7 @@
+size: micro
+port: 8080
+replicas: 1
+healthProbe:
+  httpGet:
+    path: /check
+  periodSeconds: 10
