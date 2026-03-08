@@ -1,4 +1,4 @@
-module gitonce
+module github.com/schmijos/gitonce
 
 go 1.25.0
 
