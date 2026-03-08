@@ -1,14 +1,14 @@
 .PHONY: build test run lint lint-fix mod-tidy golangci-lint modernize govulncheck
 
 build:
-	go build -o gadget-mallet .
+	go build -o gitonce .
 
 test: build
 	go test -race -coverprofile=cover.out ./...
 	go tool cover -func=cover.out | tail -1
 
 run: build
-	./gadget-mallet
+	./gitonce
 
 lint: mod-tidy golangci-lint modernize govulncheck
 

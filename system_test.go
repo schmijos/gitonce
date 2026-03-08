@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path"
+	"strings"
 	"testing"
 
 	gogit "github.com/go-git/go-git/v6"
@@ -17,11 +19,6 @@ import (
 )
 
 func TestUploadFormField(t *testing.T) {
-	t.Chdir(t.TempDir())
-	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
 	srv := httptest.NewServer(newMux())
 	defer srv.Close()
 
@@ -49,10 +46,6 @@ func TestUploadFormField(t *testing.T) {
 }
 
 func TestUploadAndClone(t *testing.T) {
-	t.Chdir(t.TempDir())
-	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
-		t.Fatal(err)
-	}
 	t.Cleanup(func() {
 		repoCache.Range(func(k, _ any) bool { repoCache.Delete(k); return true })
 	})
@@ -103,6 +96,10 @@ func TestUploadAndClone(t *testing.T) {
 		t.Fatal("no url in upload response")
 	}
 
+	// Derive the zip path from the repo URL: .../gitonce/<name>.git → /tmp/<name>.zip
+	name := strings.TrimSuffix(path.Base(repoURL), ".git")
+	zipPath := uploadsDir + "/" + name + ".zip"
+
 	// --- clone via git smart HTTP ---
 	_, err = gogit.Clone(memory.NewStorage(), memfs.New(), &gogit.CloneOptions{
 		URL: repoURL,
@@ -120,8 +117,7 @@ func TestUploadAndClone(t *testing.T) {
 	}
 
 	// --- verify zip was deleted after download ---
-	entries, _ := os.ReadDir(uploadsDir)
-	if len(entries) != 0 {
-		t.Fatalf("expected uploads dir to be empty after clone, found %d file(s)", len(entries))
+	if _, err := os.Stat(zipPath); !os.IsNotExist(err) {
+		t.Fatalf("expected zip %s to be deleted after clone", zipPath)
 	}
 }

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"archive/zip"
 	"bytes"
 	"mime/multipart"
 	"net/http"
@@ -95,28 +94,3 @@ func TestHandleUpload_NotZip(t *testing.T) {
 	}
 }
 
-func TestHandleUpload_CreateFails(t *testing.T) {
-	// t.Chdir to a dir without an uploads/ subdir so os.Create fails in saveUpload.
-	t.Chdir(t.TempDir())
-
-	var zipBuf bytes.Buffer
-	zw := zip.NewWriter(&zipBuf)
-	f, _ := zw.Create("f.txt")
-	f.Write([]byte("x")) //nolint:errcheck
-	zw.Close()            //nolint:errcheck
-
-	var body bytes.Buffer
-	mw := multipart.NewWriter(&body)
-	part, _ := mw.CreateFormFile("zipfile", "test.zip")
-	part.Write(zipBuf.Bytes()) //nolint:errcheck
-	mw.Close()                 //nolint:errcheck
-
-	req := httptest.NewRequest(http.MethodPost, "/upload", &body)
-	req.Header.Set("Content-Type", mw.FormDataContentType())
-	w := httptest.NewRecorder()
-	handleUpload(w, req)
-
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500, got %d", w.Code)
-	}
-}

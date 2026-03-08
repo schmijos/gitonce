@@ -563,33 +563,28 @@ func TestServeUploadPack_NAK(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestGetOrLoadRepo_NotFound(t *testing.T) {
-	t.Chdir(t.TempDir())
-
-	_, err := getOrLoadRepo("nonexistent")
+	_, err := getOrLoadRepo("nonexistent-repo-that-does-not-exist")
 	if err == nil {
 		t.Fatal("expected error for missing zip")
 	}
 }
 
 func TestGetOrLoadRepo_LoadsAndCaches(t *testing.T) {
-	t.Chdir(t.TempDir())
-	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
-		t.Fatal(err)
-	}
 	t.Cleanup(func() {
 		repoCache.Range(func(k, _ any) bool { repoCache.Delete(k); return true })
+		os.Remove(uploadsDir + "/myrepo-test.zip") //nolint:errcheck
 	})
 
 	zipData := makeTestZip(map[string]string{"hello.txt": "hello"})
-	if err := writeFile(uploadsDir+"/myrepo.zip", zipData); err != nil {
+	if err := writeFile(uploadsDir+"/myrepo-test.zip", zipData); err != nil {
 		t.Fatal(err)
 	}
 
-	r1, err := getOrLoadRepo("myrepo")
+	r1, err := getOrLoadRepo("myrepo-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	r2, err := getOrLoadRepo("myrepo")
+	r2, err := getOrLoadRepo("myrepo-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -727,12 +722,7 @@ func TestReadPktLine_InvalidHex(t *testing.T) {
 
 func TestHandleGit_NotFound(t *testing.T) {
 	// Zip file does not exist → os.IsNotExist → 404 from handleGit.
-	t.Chdir(t.TempDir())
-	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/gitonce/missing.git/info/refs?service=git-upload-pack", nil)
+	req := httptest.NewRequest(http.MethodGet, "/gitonce/missing-repo-xyz.git/info/refs?service=git-upload-pack", nil)
 	w := httptest.NewRecorder()
 	handleGit(w, req)
 
@@ -768,20 +758,17 @@ func TestHandleGit_ConsumedRepo(t *testing.T) {
 }
 
 func TestHandleGit_InternalError(t *testing.T) {
-	t.Chdir(t.TempDir())
-	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
-		t.Fatal(err)
-	}
 	t.Cleanup(func() {
 		repoCache.Range(func(k, _ any) bool { repoCache.Delete(k); return true })
+		os.Remove(uploadsDir + "/badrepo-test.zip") //nolint:errcheck
 	})
 	// A readable file that is not a valid zip causes buildRepoFromZip to fail
 	// with a non-IsNotExist error, hitting the 500 branch in handleGit.
-	if err := writeFile(uploadsDir+"/badrepo.zip", []byte("not a zip")); err != nil {
+	if err := writeFile(uploadsDir+"/badrepo-test.zip", []byte("not a zip")); err != nil {
 		t.Fatal(err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/gitonce/badrepo.git/info/refs?service=git-upload-pack", nil)
+	req := httptest.NewRequest(http.MethodGet, "/gitonce/badrepo-test.git/info/refs?service=git-upload-pack", nil)
 	w := httptest.NewRecorder()
 	handleGit(w, req)
 

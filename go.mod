@@ -1,4 +1,4 @@
-module gadget-mallet
+module gitonce
 
 go 1.25.0
 
