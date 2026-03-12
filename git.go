@@ -272,6 +272,11 @@ func handleGit(w http.ResponseWriter, r *http.Request) {
 	}
 	name, suffix := before, after
 
+	if strings.ContainsAny(name, "/\\") {
+		http.NotFound(w, r)
+		return
+	}
+
 	repo, err := getOrLoadRepo(name)
 	if err != nil {
 		if os.IsNotExist(err) {

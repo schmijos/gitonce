@@ -742,6 +742,16 @@ func TestHandleGit_NoDotGit(t *testing.T) {
 	}
 }
 
+func TestHandleGit_PathTraversal(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/gitonce/../../etc/passwd.git/info/refs?service=git-upload-pack", nil)
+	w := httptest.NewRecorder()
+	handleGit(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
 func TestHandleGit_ConsumedRepo(t *testing.T) {
 	// Repo already consumed → 410 from handleGit's consumed check.
 	repo := &memRepo{head: strings.Repeat("b", 40), objects: map[string][]byte{}, consumed: true}
