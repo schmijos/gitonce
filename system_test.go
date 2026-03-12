@@ -193,6 +193,11 @@ func TestKpackClonePattern(t *testing.T) {
 	if resp1.StatusCode != http.StatusOK {
 		t.Fatalf("first info/refs: got %d", resp1.StatusCode)
 	}
+	// Content-Length must be set so ingress controllers do not strip the
+	// capability advertisement (causing the client to omit side-band-64k).
+	if resp1.ContentLength < 0 {
+		t.Fatal("first info/refs: missing Content-Length")
+	}
 
 	// --- second GET /info/refs (kpack fetches refs again before cloning) ---
 	resp2, err := http.Get(infoRefsURL)
@@ -203,6 +208,9 @@ func TestKpackClonePattern(t *testing.T) {
 	resp2.Body.Close()
 	if resp2.StatusCode != http.StatusOK {
 		t.Fatalf("second info/refs: got %d", resp2.StatusCode)
+	}
+	if resp2.ContentLength < 0 {
+		t.Fatal("second info/refs: missing Content-Length")
 	}
 
 	// --- POST /git-upload-pack with side-band-64k (kpack always requests it) ---

@@ -306,14 +306,22 @@ func handleGit(w http.ResponseWriter, r *http.Request) {
 }
 
 func serveInfoRefs(w http.ResponseWriter, repo *memRepo) {
+	// Build the full response body before writing so we can set Content-Length.
+	// Without Content-Length the response uses chunked transfer encoding, which
+	// some Kubernetes ingress controllers do not forward correctly, causing the
+	// client to receive an empty capability advertisement and omit side-band-64k
+	// from the subsequent upload-pack request.
+	var body bytes.Buffer
+	body.Write(pktLine([]byte("# service=git-upload-pack\n")))
+	body.Write(pktFlush)
+	body.Write(pktLine(fmt.Appendf(nil, "%s HEAD\x00side-band-64k ofs-delta allow-tip-sha1-in-want allow-reachable-sha1-in-want agent=git/2.0\n", repo.head)))
+	body.Write(pktLine(fmt.Appendf(nil, "%s refs/heads/main\n", repo.head)))
+	body.Write(pktFlush)
+
 	w.Header().Set("Content-Type", "application/x-git-upload-pack-advertisement")
 	w.Header().Set("Cache-Control", "no-cache")
-
-	w.Write(pktLine([]byte("# service=git-upload-pack\n")))
-	w.Write(pktFlush)
-	w.Write(pktLine(fmt.Appendf(nil, "%s HEAD\x00side-band-64k ofs-delta allow-tip-sha1-in-want allow-reachable-sha1-in-want agent=git/2.0\n", repo.head)))
-	w.Write(pktLine(fmt.Appendf(nil, "%s refs/heads/main\n", repo.head)))
-	w.Write(pktFlush)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", body.Len()))
+	w.Write(body.Bytes())
 }
 
 func serveUploadPack(w http.ResponseWriter, r *http.Request, repo *memRepo) {
