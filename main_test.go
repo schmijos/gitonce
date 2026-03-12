@@ -16,12 +16,18 @@ func TestLogRequests(t *testing.T) {
 	log.SetOutput(&buf)
 	defer log.SetOutput(os.Stderr)
 
-	handler := logRequests(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	handler := logRequests(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
 	req := httptest.NewRequest(http.MethodGet, "/some/path?q=1", nil)
 	handler.ServeHTTP(httptest.NewRecorder(), req)
 
-	if !strings.Contains(buf.String(), "GET /some/path?q=1") {
-		t.Fatalf("expected log line with method and URL, got: %q", buf.String())
+	logged := buf.String()
+	if !strings.Contains(logged, "GET /some/path?q=1") {
+		t.Fatalf("expected log line with method and URL, got: %q", logged)
+	}
+	if !strings.Contains(logged, "418") {
+		t.Fatalf("expected log line with status code, got: %q", logged)
 	}
 }
 
