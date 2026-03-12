@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,20 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestLogRequests(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+
+	handler := logRequests(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	req := httptest.NewRequest(http.MethodGet, "/some/path?q=1", nil)
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	if !strings.Contains(buf.String(), "GET /some/path?q=1") {
+		t.Fatalf("expected log line with method and URL, got: %q", buf.String())
+	}
+}
 
 func TestHandleCheck(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/check", nil)

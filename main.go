@@ -45,12 +45,19 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              ":" + port,
-		Handler:           newMux(),
+		Handler:           logRequests(newMux()),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	log.Printf("Listening on :%s", port)
 	log.Fatal(srv.ListenAndServe())
+}
+
+func logRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("%s %s", r.Method, r.URL)
+		next.ServeHTTP(w, r)
+	})
 }
 
 func handleCheck(w http.ResponseWriter, _ *http.Request) {
