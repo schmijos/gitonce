@@ -18,6 +18,41 @@ import (
 	"github.com/go-git/go-billy/v6/memfs"
 )
 
+// uploadZip uploads a zip to the test server and returns the repo URL and HEAD commit SHA.
+func uploadZip(t *testing.T, srv *httptest.Server, zipData []byte) (repoURL, commitSHA string) {
+	t.Helper()
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	part, err := mw.CreateFormFile("zipfile", "test.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(zipData); err != nil {
+		t.Fatal(err)
+	}
+	mw.Close()
+
+	resp, err := http.Post(srv.URL+"/upload", mw.FormDataContentType(), &body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("upload: got %d – %s", resp.StatusCode, b)
+	}
+	var result map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	repoURL = result["url"]
+	commitSHA = result["commit"]
+	if repoURL == "" || commitSHA == "" {
+		t.Fatalf("upload response missing url or commit: %v", result)
+	}
+	return
+}
+
 func TestUploadFormField(t *testing.T) {
 	srv := httptest.NewServer(newMux())
 	defer srv.Close()
@@ -122,5 +157,128 @@ func TestUploadAndClone(t *testing.T) {
 	// --- verify zip was deleted after download ---
 	if _, err := os.Stat(zipPath); !os.IsNotExist(err) {
 		t.Fatalf("expected zip %s to be deleted after clone", zipPath)
+	}
+}
+
+// TestKpackClonePattern simulates the exact HTTP request sequence that kpack
+// (Kubernetes Native Container Build Service) uses when cloning a git repo:
+// two GETs to /info/refs followed by one POST to /git-upload-pack with
+// side-band-64k requested. This pattern differs from vanilla git which does
+// a single GET + POST.
+func TestKpackClonePattern(t *testing.T) {
+	t.Cleanup(func() {
+		repoCache.Range(func(k, _ any) bool { repoCache.Delete(k); return true })
+	})
+
+	srv := httptest.NewServer(newMux())
+	defer srv.Close()
+
+	var zipBuf bytes.Buffer
+	zw := zip.NewWriter(&zipBuf)
+	fw, _ := zw.Create("hello.txt")
+	fw.Write([]byte("hello kpack"))
+	zw.Close()
+
+	repoURL, commitSHA := uploadZip(t, srv, zipBuf.Bytes())
+	infoRefsURL := repoURL + "/info/refs?service=git-upload-pack"
+	uploadPackURL := repoURL + "/git-upload-pack"
+
+	// --- first GET /info/refs (kpack probes the repo) ---
+	resp1, err := http.Get(infoRefsURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp1.Body)
+	resp1.Body.Close()
+	if resp1.StatusCode != http.StatusOK {
+		t.Fatalf("first info/refs: got %d", resp1.StatusCode)
+	}
+
+	// --- second GET /info/refs (kpack fetches refs again before cloning) ---
+	resp2, err := http.Get(infoRefsURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp2.Body)
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("second info/refs: got %d", resp2.StatusCode)
+	}
+
+	// --- POST /git-upload-pack with side-band-64k (kpack always requests it) ---
+	reqBody := uploadPackRequest(commitSHA, "side-band-64k", "ofs-delta")
+	var bodyBuf bytes.Buffer
+	io.Copy(&bodyBuf, reqBody)
+
+	postResp, err := http.Post(uploadPackURL, "application/x-git-upload-pack-request", &bodyBuf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer postResp.Body.Close()
+	if postResp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(postResp.Body)
+		t.Fatalf("upload-pack: got %d – %s", postResp.StatusCode, b)
+	}
+
+	// Read NAK pkt-line.
+	nak, flush, err := readPktLine(postResp.Body)
+	if err != nil {
+		t.Fatalf("reading NAK: %v", err)
+	}
+	if flush || !bytes.HasPrefix(nak, []byte("NAK")) {
+		t.Fatalf("expected NAK, got flush=%v data=%q", flush, nak)
+	}
+
+	// Reassemble pack data from side-band channel-1 packets.
+	var pack bytes.Buffer
+	for {
+		data, flush, err := readPktLine(postResp.Body)
+		if err != nil {
+			t.Fatalf("reading sideband: %v", err)
+		}
+		if flush {
+			break
+		}
+		if len(data) == 0 {
+			continue
+		}
+		channel := data[0]
+		payload := data[1:]
+		switch channel {
+		case 1: // data
+			pack.Write(payload)
+		case 2: // progress — ignore
+		case 3:
+			t.Fatalf("sideband error: %s", payload)
+		default:
+			t.Fatalf("unexpected sideband channel %d", channel)
+		}
+	}
+
+	packBytes := pack.Bytes()
+	if len(packBytes) < 32 {
+		t.Fatalf("pack too short: %d bytes", len(packBytes))
+	}
+	if !bytes.HasPrefix(packBytes, []byte("PACK")) {
+		t.Fatalf("pack missing PACK magic, got %q", packBytes[:4])
+	}
+	if count := packObjectCount(packBytes); count == 0 {
+		t.Fatal("pack contains zero objects")
+	}
+	if !packSHA1Valid(packBytes) {
+		t.Fatal("pack SHA1 checksum invalid")
+	}
+
+	// --- repo must be consumed; repeat POST must return 410 Gone ---
+	var body2 bytes.Buffer
+	io.Copy(&body2, uploadPackRequest(commitSHA, "side-band-64k"))
+	resp3, err := http.Post(uploadPackURL, "application/x-git-upload-pack-request", &body2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp3.Body)
+	resp3.Body.Close()
+	if resp3.StatusCode != http.StatusGone {
+		t.Fatalf("expected 410 Gone on second clone, got %d", resp3.StatusCode)
 	}
 }
