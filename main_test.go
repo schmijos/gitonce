@@ -1,7 +1,9 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"log"
 	"mime/multipart"
 	"net/http"
@@ -113,5 +115,60 @@ func TestHandleUpload_NotZip(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", w.Code)
 	}
+}
+
+func TestHandleUpload_SchemeFromForwardedProto(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	makeZipBody := func(t *testing.T) (*bytes.Buffer, string) {
+		t.Helper()
+		var zipBuf bytes.Buffer
+		zw := zip.NewWriter(&zipBuf)
+		f, _ := zw.Create("file.txt")
+		f.Write([]byte("data")) //nolint:errcheck
+		zw.Close()              //nolint:errcheck
+
+		var body bytes.Buffer
+		mw := multipart.NewWriter(&body)
+		part, _ := mw.CreateFormFile("zipfile", "test.zip")
+		part.Write(zipBuf.Bytes()) //nolint:errcheck
+		mw.Close()                         //nolint:errcheck
+		return &body, mw.FormDataContentType()
+	}
+
+	t.Run("no TLS no header gives http", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		body, ct := makeZipBody(t)
+		req := httptest.NewRequest(http.MethodPost, "/upload", body)
+		req.Header.Set("Content-Type", ct)
+		w := httptest.NewRecorder()
+		handleUpload(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", w.Code)
+		}
+		var result map[string]string
+		json.NewDecoder(w.Body).Decode(&result) //nolint:errcheck
+		if !strings.HasPrefix(result["url"], "http://") {
+			t.Fatalf("expected http:// URL, got %q", result["url"])
+		}
+	})
+
+	t.Run("X-Forwarded-Proto https gives https URL", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		body, ct := makeZipBody(t)
+		req := httptest.NewRequest(http.MethodPost, "/upload", body)
+		req.Header.Set("Content-Type", ct)
+		req.Header.Set("X-Forwarded-Proto", "https")
+		w := httptest.NewRecorder()
+		handleUpload(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", w.Code)
+		}
+		var result map[string]string
+		json.NewDecoder(w.Body).Decode(&result) //nolint:errcheck
+		if !strings.HasPrefix(result["url"], "https://") {
+			t.Fatalf("expected https:// URL, got %q", result["url"])
+		}
+	})
 }
 

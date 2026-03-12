@@ -116,9 +116,9 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scheme := "https"
-	if r.TLS == nil {
-		scheme = "http"
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]string{
