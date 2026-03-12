@@ -851,6 +851,35 @@ func TestServeUploadPack_RemoveFails(t *testing.T) {
 	}
 }
 
+func TestServeUploadPack_KeepUploads(t *testing.T) {
+	// When keepUploads is true the zip file must not be deleted.
+	orig := keepUploads
+	keepUploads = true
+	t.Cleanup(func() { keepUploads = orig })
+
+	zipPath := filepath.Join(t.TempDir(), "keep.zip")
+	if err := os.WriteFile(zipPath, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	blobSHA, blobRaw := gitObject("blob", []byte("x"))
+	repo := &memRepo{
+		objects: map[string][]byte{blobSHA: blobRaw},
+		head:    blobSHA,
+		zipPath: zipPath,
+	}
+	req := httptest.NewRequest(http.MethodPost, "/git-upload-pack",
+		uploadPackRequest(blobSHA))
+	w := httptest.NewRecorder()
+	serveUploadPack(w, req, repo)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if _, err := os.Stat(zipPath); err != nil {
+		t.Fatalf("zip file should still exist, got: %v", err)
+	}
+}
+
 func TestServeUploadPack_BuildPackError(t *testing.T) {
 	// A raw object with no NUL separator causes buildPack to return an error.
 	repo := &memRepo{

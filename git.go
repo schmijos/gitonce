@@ -19,6 +19,10 @@ import (
 	"time"
 )
 
+// keepUploads, when true, skips deleting zip files after serving them.
+// Set KEEP_UPLOADS=true to enable.
+var keepUploads = os.Getenv("KEEP_UPLOADS") == "true"
+
 // ---------------------------------------------------------------------------
 // In-memory repo registry
 // ---------------------------------------------------------------------------
@@ -362,8 +366,10 @@ func serveUploadPack(w http.ResponseWriter, r *http.Request, repo *memRepo) {
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", body.Len()))
 	w.Write(body.Bytes())
 
-	if err := os.Remove(repo.zipPath); err != nil && !os.IsNotExist(err) {
-		log.Printf("failed to delete zip %s: %v", repo.zipPath, err)
+	if !keepUploads {
+		if err := os.Remove(repo.zipPath); err != nil && !os.IsNotExist(err) {
+			log.Printf("failed to delete zip %s: %v", repo.zipPath, err)
+		}
 	}
 }
 
