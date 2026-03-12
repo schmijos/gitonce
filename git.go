@@ -334,15 +334,25 @@ func serveUploadPack(w http.ResponseWriter, r *http.Request, repo *memRepo) {
 		return
 	}
 
+	// Build the full response body before writing so we can set Content-Length.
+	// Without Content-Length the response uses chunked transfer encoding, which
+	// some Kubernetes ingress controllers do not forward correctly for git smart
+	// HTTP, causing the client to see an empty pack.
+	var body bytes.Buffer
+	body.Write(pktLine([]byte("NAK\n")))
+	if sideband {
+		writeSideband(&body, pack)
+	} else {
+		body.Write(pack)
+	}
+
+	log.Printf("upload-pack: sideband=%v pack=%d bytes objects=%d response=%d bytes",
+		sideband, len(pack), len(repo.objects), body.Len())
+
 	w.Header().Set("Content-Type", "application/x-git-upload-pack-result")
 	w.Header().Set("Cache-Control", "no-cache")
-	w.Write(pktLine([]byte("NAK\n")))
-
-	if sideband {
-		writeSideband(w, pack)
-	} else {
-		w.Write(pack)
-	}
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", body.Len()))
+	w.Write(body.Bytes())
 
 	if err := os.Remove(repo.zipPath); err != nil && !os.IsNotExist(err) {
 		log.Printf("failed to delete zip %s: %v", repo.zipPath, err)
