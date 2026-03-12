@@ -95,6 +95,9 @@ func TestUploadAndClone(t *testing.T) {
 	if repoURL == "" {
 		t.Fatal("no url in upload response")
 	}
+	if result["commit"] == "" {
+		t.Fatal("no commit in upload response")
+	}
 
 	// Derive the zip path from the repo URL: .../gitonce/<name>.git → /tmp/<name>.zip
 	name := strings.TrimSuffix(path.Base(repoURL), ".git")

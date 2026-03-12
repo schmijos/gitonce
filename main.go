@@ -110,6 +110,12 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	repo, err := getOrLoadRepo(name)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
 	scheme := "https"
 	if r.TLS == nil {
 		scheme = "http"
@@ -118,6 +124,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(map[string]string{
 		"message": "upload successful",
 		"url":     fmt.Sprintf("%s://%s/gitonce/%s.git", scheme, r.Host, name),
+		"commit":  repo.head,
 	}); err != nil {
 		log.Printf("json encode: %v", err)
 	}
