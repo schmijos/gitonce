@@ -306,7 +306,7 @@ func serveInfoRefs(w http.ResponseWriter, repo *memRepo) {
 
 	w.Write(pktLine([]byte("# service=git-upload-pack\n")))
 	w.Write(pktFlush)
-	w.Write(pktLine(fmt.Appendf(nil, "%s HEAD\x00side-band-64k ofs-delta agent=git/2.0\n", repo.head)))
+	w.Write(pktLine(fmt.Appendf(nil, "%s HEAD\x00side-band-64k ofs-delta allow-tip-sha1-in-want allow-reachable-sha1-in-want agent=git/2.0\n", repo.head)))
 	w.Write(pktLine(fmt.Appendf(nil, "%s refs/heads/main\n", repo.head)))
 	w.Write(pktFlush)
 }
