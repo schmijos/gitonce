@@ -141,6 +141,11 @@ func buildRepoFromZip(data []byte) (*memRepo, error) {
 	commitSHA, commitRaw := commitObject(rootSHA)
 	objects[commitSHA] = commitRaw
 
+	if debug {
+		log.Printf("DEBUG git settings: author=%q tree=%s head=%s objects=%d",
+			"Upload <upload@localhost>", rootSHA, commitSHA, len(objects))
+	}
+
 	return &memRepo{objects: objects, head: commitSHA}, nil
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,8 @@ import (
 	"path/filepath"
 	"time"
 )
+
+var debug = os.Getenv("DEBUG") == "true"
 
 const defaultPort = "8080"
 const maxUploadSize = 50 << 20 // 50 MB
@@ -56,6 +59,7 @@ func main() {
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
+	body   *bytes.Buffer // non-nil only when debug is enabled
 }
 
 func (sr *statusRecorder) WriteHeader(code int) {
@@ -63,12 +67,43 @@ func (sr *statusRecorder) WriteHeader(code int) {
 	sr.ResponseWriter.WriteHeader(code)
 }
 
+func (sr *statusRecorder) Write(b []byte) (int, error) {
+	if sr.body != nil {
+		sr.body.Write(b)
+	}
+	return sr.ResponseWriter.Write(b)
+}
+
 func logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		if debug {
+			rec.body = &bytes.Buffer{}
+			log.Printf("DEBUG request headers: %v", r.Header)
+			if r.Body != nil {
+				bodyBytes, _ := io.ReadAll(r.Body)
+				r.Body.Close()
+				log.Printf("DEBUG request body (%d bytes): %q", len(bodyBytes), debugTruncate(bodyBytes))
+				r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			}
+		}
 		next.ServeHTTP(rec, r)
 		log.Printf("%s %s %d", r.Method, r.URL, rec.status)
+		if debug {
+			log.Printf("DEBUG response headers: %v", rec.Header())
+			b := rec.body.Bytes()
+			log.Printf("DEBUG response body (%d bytes): %q", len(b), debugTruncate(b))
+		}
 	})
+}
+
+const debugMaxBytes = 1024
+
+func debugTruncate(b []byte) []byte {
+	if len(b) > debugMaxBytes {
+		return b[:debugMaxBytes]
+	}
+	return b
 }
 
 func handleCheck(w http.ResponseWriter, _ *http.Request) {
