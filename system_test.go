@@ -213,10 +213,13 @@ func TestKpackClonePattern(t *testing.T) {
 		t.Fatal("second info/refs: missing Content-Length")
 	}
 
-	// --- POST /git-upload-pack with side-band-64k (kpack always requests it) ---
-	reqBody := uploadPackRequest(commitSHA, "side-band-64k", "ofs-delta")
+	// --- POST /git-upload-pack with side-band-64k + deepen (real kpack request) ---
+	// kpack's go-git always includes "deepen 1" for shallow clones.
 	var bodyBuf bytes.Buffer
-	io.Copy(&bodyBuf, reqBody)
+	bodyBuf.Write(pktLine([]byte("want " + commitSHA + " side-band-64k ofs-delta\n")))
+	bodyBuf.Write(pktLine([]byte("deepen 1\n")))
+	bodyBuf.Write(pktFlush)
+	bodyBuf.Write(pktLine([]byte("done\n")))
 
 	postResp, err := http.Post(uploadPackURL, "application/x-git-upload-pack-request", &bodyBuf)
 	if err != nil {
@@ -226,6 +229,27 @@ func TestKpackClonePattern(t *testing.T) {
 	if postResp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(postResp.Body)
 		t.Fatalf("upload-pack: got %d – %s", postResp.StatusCode, b)
+	}
+
+	// When deepen was requested, the server must send shallow <sha> + flush
+	// before NAK. Without this, go-git's shallow-update parser consumes the
+	// NAK pkt-line and the server-response reader never sees it.
+	shallow, flush, err := readPktLine(postResp.Body)
+	if err != nil {
+		t.Fatalf("reading shallow line: %v", err)
+	}
+	if flush {
+		t.Fatal("expected shallow line, got flush")
+	}
+	if !bytes.HasPrefix(shallow, []byte("shallow ")) {
+		t.Fatalf("expected shallow line, got %q", shallow)
+	}
+	if !bytes.HasSuffix(bytes.TrimRight(shallow, "\n"), []byte(commitSHA)) {
+		t.Fatalf("shallow line has wrong SHA: %q", shallow)
+	}
+	_, flushAfterShallow, err := readPktLine(postResp.Body)
+	if err != nil || !flushAfterShallow {
+		t.Fatalf("expected flush after shallow lines: err=%v flush=%v", err, flushAfterShallow)
 	}
 
 	// Read NAK pkt-line.

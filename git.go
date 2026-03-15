@@ -323,7 +323,7 @@ func serveInfoRefs(w http.ResponseWriter, repo *memRepo) {
 	var body bytes.Buffer
 	body.Write(pktLine([]byte("# service=git-upload-pack\n")))
 	body.Write(pktFlush)
-	body.Write(pktLine(fmt.Appendf(nil, "%s HEAD\x00side-band-64k ofs-delta allow-tip-sha1-in-want allow-reachable-sha1-in-want agent=git/2.0\n", repo.head)))
+	body.Write(pktLine(fmt.Appendf(nil, "%s HEAD\x00side-band-64k ofs-delta allow-tip-sha1-in-want allow-reachable-sha1-in-want shallow agent=git/2.0\n", repo.head)))
 	body.Write(pktLine(fmt.Appendf(nil, "%s refs/heads/main\n", repo.head)))
 	body.Write(pktFlush)
 
@@ -343,7 +343,7 @@ func serveUploadPack(w http.ResponseWriter, r *http.Request, repo *memRepo) {
 	repo.consumed = true
 	repo.mu.Unlock()
 
-	sideband := scanUploadPackRequest(r.Body)
+	sideband, deepen := scanUploadPackRequest(r.Body)
 
 	pack, err := buildPack(repo.objects)
 	if err != nil {
@@ -356,6 +356,16 @@ func serveUploadPack(w http.ResponseWriter, r *http.Request, repo *memRepo) {
 	// some Kubernetes ingress controllers do not forward correctly for git smart
 	// HTTP, causing the client to see an empty pack.
 	var body bytes.Buffer
+	if deepen {
+		// When the client requests a shallow clone (deepen N), the git protocol
+		// requires the server to send shallow boundary lines + flush before NAK.
+		// Without this, go-git's shallow-update parser reads ahead past the NAK
+		// pkt-line while scanning for shallow entries, consuming it — so the
+		// server-response parser never sees NAK and tries to parse the sideband
+		// pack header as a NAK line, resulting in "empty packfile".
+		body.Write(pktLine(fmt.Appendf(nil, "shallow %s\n", repo.head)))
+		body.Write(pktFlush)
+	}
 	body.Write(pktLine([]byte("NAK\n")))
 	if sideband {
 		writeSideband(&body, pack)
@@ -379,8 +389,9 @@ func serveUploadPack(w http.ResponseWriter, r *http.Request, repo *memRepo) {
 }
 
 // scanUploadPackRequest drains the client's want/done lines and reports
-// whether side-band-64k was requested.
-func scanUploadPackRequest(r io.ReadCloser) (sideband bool) {
+// whether side-band-64k was requested and whether a deepen (shallow clone)
+// was requested.
+func scanUploadPackRequest(r io.ReadCloser) (sideband, deepen bool) {
 	defer r.Close()
 	for {
 		data, flush, err := readPktLine(r)
@@ -397,6 +408,9 @@ func scanUploadPackRequest(r io.ReadCloser) (sideband bool) {
 		}
 		if !sideband && bytes.HasPrefix(data, []byte("want ")) {
 			sideband = bytes.Contains(data, []byte("side-band-64k"))
+		}
+		if !deepen && bytes.HasPrefix(data, []byte("deepen ")) {
+			deepen = true
 		}
 	}
 }

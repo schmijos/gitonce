@@ -403,23 +403,41 @@ func TestReadPktLine_BinaryData(t *testing.T) {
 
 func TestScanUploadPackRequest_Sideband(t *testing.T) {
 	sha := strings.Repeat("a", 40)
-	if !scanUploadPackRequest(uploadPackRequest(sha, "side-band-64k", "ofs-delta")) {
+	sideband, _ := scanUploadPackRequest(uploadPackRequest(sha, "side-band-64k", "ofs-delta"))
+	if !sideband {
 		t.Fatal("expected sideband=true")
 	}
 }
 
 func TestScanUploadPackRequest_NoSideband(t *testing.T) {
 	sha := strings.Repeat("a", 40)
-	if scanUploadPackRequest(uploadPackRequest(sha)) {
+	sideband, _ := scanUploadPackRequest(uploadPackRequest(sha))
+	if sideband {
 		t.Fatal("expected sideband=false")
 	}
 }
 
 func TestScanUploadPackRequest_EmptyBody(t *testing.T) {
 	// Should not panic or block on an empty body
-	result := scanUploadPackRequest(io.NopCloser(bytes.NewReader(nil)))
-	if result {
-		t.Fatal("expected sideband=false for empty body")
+	sideband, deepen := scanUploadPackRequest(io.NopCloser(bytes.NewReader(nil)))
+	if sideband || deepen {
+		t.Fatal("expected sideband=false, deepen=false for empty body")
+	}
+}
+
+func TestScanUploadPackRequest_Deepen(t *testing.T) {
+	sha := strings.Repeat("a", 40)
+	var buf bytes.Buffer
+	buf.Write(pktLine([]byte("want " + sha + " side-band-64k\n")))
+	buf.Write(pktLine([]byte("deepen 1\n")))
+	buf.Write(pktFlush)
+	buf.Write(pktLine([]byte("done\n")))
+	sideband, deepen := scanUploadPackRequest(io.NopCloser(&buf))
+	if !sideband {
+		t.Fatal("expected sideband=true")
+	}
+	if !deepen {
+		t.Fatal("expected deepen=true")
 	}
 }
 
