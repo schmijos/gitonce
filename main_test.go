@@ -132,7 +132,7 @@ func TestHandleUpload_SchemeFromForwardedProto(t *testing.T) {
 		mw := multipart.NewWriter(&body)
 		part, _ := mw.CreateFormFile("zipfile", "test.zip")
 		part.Write(zipBuf.Bytes()) //nolint:errcheck
-		mw.Close()                         //nolint:errcheck
+		mw.Close()                 //nolint:errcheck
 		return &body, mw.FormDataContentType()
 	}
 
@@ -172,3 +172,18 @@ func TestHandleUpload_SchemeFromForwardedProto(t *testing.T) {
 	})
 }
 
+func TestHandleUpload_UnsafeZipEntry(t *testing.T) {
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	part, _ := mw.CreateFormFile("zipfile", "evil.zip")
+	part.Write(makeTestZip(map[string]string{"../evil": "x"})) //nolint:errcheck
+	mw.Close()                                                 //nolint:errcheck
+
+	req := httptest.NewRequest(http.MethodPost, "/upload", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	w := httptest.NewRecorder()
+	handleUpload(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}

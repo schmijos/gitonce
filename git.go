@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -114,11 +115,14 @@ func buildRepoFromZip(data []byte) (*memRepo, error) {
 	}
 
 	objects := make(map[string][]byte)
-	files := make(map[string]string) // zip path -> blob sha
+	files := make(map[string]string) // zip path -> "<mode> <blob sha>"
 
 	for _, f := range r.File {
 		if f.FileInfo().IsDir() {
 			continue
+		}
+		if !fs.ValidPath(f.Name) {
+			return nil, fmt.Errorf("zip entry %q: %w", f.Name, fs.ErrInvalid)
 		}
 		rc, err := f.Open()
 		if err != nil {
@@ -131,7 +135,11 @@ func buildRepoFromZip(data []byte) (*memRepo, error) {
 		}
 		sha, raw := gitObject("blob", content)
 		objects[sha] = raw
-		files[f.Name] = sha
+		mode := "100644"
+		if f.Mode()&0o111 != 0 {
+			mode = "100755"
+		}
+		files[f.Name] = mode + " " + sha
 	}
 
 	rootSHA, err := buildTree(files, "", objects)
@@ -163,7 +171,11 @@ func buildTree(files map[string]string, prefix string, objects map[string][]byte
 			continue
 		}
 		if before, _, ok := strings.Cut(rel, "/"); !ok {
-			entries = append(entries, treeEntry{mode: "100644", name: rel, sha: blobSHA})
+			mode, sha, ok := strings.Cut(blobSHA, " ")
+			if !ok {
+				mode, sha = "100644", blobSHA
+			}
+			entries = append(entries, treeEntry{mode: mode, name: rel, sha: sha})
 		} else {
 			dir := before
 			if seen[dir] {
@@ -296,14 +308,8 @@ func handleGit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	repo.mu.Lock()
-	consumed := repo.consumed
-	repo.mu.Unlock()
-	if consumed {
-		http.Error(w, "gone", http.StatusGone)
-		return
-	}
-
+	// Only the pack fetch is one-time; refs stay advertised so ls-remote and
+	// kpack's re-resolve keep working after the clone.
 	switch {
 	case suffix == "/info/refs" && r.URL.Query().Get("service") == "git-upload-pack":
 		serveInfoRefs(w, repo)

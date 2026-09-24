@@ -6,11 +6,14 @@ import (
 	"crypto/sha1"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -656,7 +659,7 @@ func TestBuildRepoFromZip_SkipsDirEntries(t *testing.T) {
 	zw.CreateHeader(&zip.FileHeader{Name: "emptydir/", Method: zip.Store}) //nolint:errcheck
 	f, _ := zw.Create("hello.txt")
 	f.Write([]byte("hi")) //nolint:errcheck
-	zw.Close()             //nolint:errcheck
+	zw.Close()            //nolint:errcheck
 
 	repo, err := buildRepoFromZip(buf.Bytes())
 	if err != nil {
@@ -776,12 +779,23 @@ func TestHandleGit_ConsumedRepo(t *testing.T) {
 	repoCache.Store("consumedrepo", repo)
 	t.Cleanup(func() { repoCache.Delete("consumedrepo") })
 
+	// Ref advertisement keeps working so ls-remote and kpack re-resolves stay green.
 	req := httptest.NewRequest(http.MethodGet, "/gitonce/consumedrepo.git/info/refs?service=git-upload-pack", nil)
 	w := httptest.NewRecorder()
 	handleGit(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("info/refs on consumed repo: expected 200, got %d", w.Code)
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte(repo.head)) {
+		t.Fatal("info/refs on consumed repo must still advertise HEAD")
+	}
 
+	// Only the pack fetch is one-time.
+	req = httptest.NewRequest(http.MethodPost, "/gitonce/consumedrepo.git/git-upload-pack", uploadPackRequest(repo.head))
+	w = httptest.NewRecorder()
+	handleGit(w, req)
 	if w.Code != http.StatusGone {
-		t.Fatalf("expected 410, got %d", w.Code)
+		t.Fatalf("upload-pack on consumed repo: expected 410, got %d", w.Code)
 	}
 }
 
@@ -924,4 +938,57 @@ func writeFile(path string, data []byte) error {
 	defer f.Close()
 	_, err = f.Write(data)
 	return err
+}
+
+// ---------------------------------------------------------------------------
+// buildRepoFromZip — entry names and modes
+// ---------------------------------------------------------------------------
+
+func TestBuildRepoFromZip_RejectsUnsafePaths(t *testing.T) {
+	for _, name := range []string{"../evil", "/abs", "a/../../b", "./x"} {
+		_, err := buildRepoFromZip(makeTestZip(map[string]string{name: "x"}))
+		if !errors.Is(err, fs.ErrInvalid) {
+			t.Fatalf("%q: expected fs.ErrInvalid, got %v", name, err)
+		}
+	}
+}
+
+func TestBuildRepoFromZip_ExecutableMode(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	hdr := &zip.FileHeader{Name: "bin/run", Method: zip.Deflate}
+	hdr.SetMode(0o755)
+	w, _ := zw.CreateHeader(hdr)
+	w.Write([]byte("#!/bin/sh\n")) //nolint:errcheck
+	w, _ = zw.Create("README")
+	w.Write([]byte("hi")) //nolint:errcheck
+	zw.Close()            //nolint:errcheck
+
+	repo, err := buildRepoFromZip(buf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var modes []string
+	for _, raw := range repo.objects {
+		if bytes.HasPrefix(raw, []byte("tree ")) {
+			modes = append(modes, treeEntryModes(raw)...)
+		}
+	}
+	sort.Strings(modes)
+	want := []string{"100644 README", "100755 run", "40000 bin"}
+	if strings.Join(modes, ",") != strings.Join(want, ",") {
+		t.Fatalf("tree entries = %v, want %v", modes, want)
+	}
+}
+
+// treeEntryModes parses "mode name" pairs out of a raw tree object.
+func treeEntryModes(raw []byte) []string {
+	content := raw[bytes.IndexByte(raw, 0)+1:]
+	var out []string
+	for len(content) > 0 {
+		null := bytes.IndexByte(content, 0)
+		out = append(out, string(content[:null]))
+		content = content[null+1+20:]
+	}
+	return out
 }

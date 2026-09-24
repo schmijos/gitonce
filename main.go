@@ -5,8 +5,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -146,6 +148,10 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	repo, err := getOrLoadRepo(name)
+	if errors.Is(err, fs.ErrInvalid) {
+		http.Error(w, "zip contains an unsafe path", http.StatusBadRequest)
+		return
+	}
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
