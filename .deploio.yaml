@@ -1,5 +1,6 @@
 size: micro
 port: 8080
+# Repos live in process memory and /tmp: more than one replica breaks clones.
 replicas: 1
 healthProbe:
   httpGet:

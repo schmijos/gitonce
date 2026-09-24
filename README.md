@@ -6,7 +6,9 @@ Upload a zip file, get back a one-time-use git repository URL.
 
 1. Upload a zip via the web UI or API — the server stores it and returns a git URL.
 2. Clone from that URL. The server builds a git repository from the zip contents entirely in memory and serves it over the Smart HTTP protocol.
-3. The URL expires after one clone. The zip is deleted from disk once the download completes.
+3. The pack can be fetched once. The zip is deleted from disk once the download completes. Ref advertisement (`ls-remote`) keeps working afterwards, only the fetch returns `410 Gone`.
+
+Repositories live in process memory and `/tmp`, so run exactly one replica and expect a restart between upload and clone to lose pending uploads.
 
 ## API
 
