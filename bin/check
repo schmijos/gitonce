@@ -1,0 +1,9 @@
+#!/bin/sh
+# Lints and tests. Set SKIP_NCTL_CONTRACT=1 to skip the nctl contract test
+# that depends on the real nctl client module.
+set -e
+cd "$(dirname "$0")/.."
+make lint test
+if [ -z "$SKIP_NCTL_CONTRACT" ]; then
+	(cd nctlcontract && go test ./...)
+fi

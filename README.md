@@ -40,8 +40,10 @@ Standard git Smart HTTP — works with any git client.
 ## Running
 
 ```
-make test
+bin/check
 make run
 ```
 
 Listens on `:8080`.
+
+`bin/check` lints, runs the unit tests and then the nctl contract test in `nctlcontract/`, which builds the binary and drives it with the real nctl client (`github.com/ninech/nctl/api/gitonce`) followed by a shallow go-git clone. The module is separate so the server keeps its small dependency tree; set `SKIP_NCTL_CONTRACT=1` to skip it. Bump the nctl version in `nctlcontract/go.mod` when the client changes.
