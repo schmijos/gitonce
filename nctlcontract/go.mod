@@ -18,10 +18,10 @@ require (
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/pjbgf/sha1cd v0.6.0 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
-	golang.org/x/crypto v0.54.0 // indirect
-	golang.org/x/net v0.57.0 // indirect
+	golang.org/x/crypto v0.55.0 // indirect
+	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 )
 
-replace github.com/ninech/nctl => github.com/schmijos/nctl v0.0.0-20260924084629-42612d436fd8
+replace github.com/ninech/nctl => github.com/schmijos/nctl v0.0.0-20260924134551-5260e566047d
